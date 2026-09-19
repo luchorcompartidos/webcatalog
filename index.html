@@ -1,11 +1,3 @@
-https://docs.google.com/spreadsheets/d/1dkGOT3XaPuHa8Kpj_UpD_sKkSGCs_1P5HyL_Z2IIcmQ/edit?gid=0#gid=0
-
-
-
-
-
-
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -116,7 +108,7 @@ https://docs.google.com/spreadsheets/d/1dkGOT3XaPuHa8Kpj_UpD_sKkSGCs_1P5HyL_Z2II
   // aparezcan, y decide cómo mostrar cada valor según su propio contenido
   // (por ejemplo, si "parece" una URL o no). Si agregás, quitás o reordenás
   // columnas en la planilla, la página se adapta sola sin tocar el código.
-  const SHEET_ID = "1dkGOT3XaPuHa8Kpj_UpD_sKkSGCs_1P5HyL_Z2IIcmQ";
+  const SHEET_ID = "1ZyWPJhsR2ZQrPdE6d49ITedRHwm8cOeP-qbnUnd24Yw";
   const GID = "0";
   const REFRESH_MS = 86400000; // vuelve a sincronizar cada 24 horas
   const URL_REGEX = /^https?:\/\//i;
@@ -146,6 +138,15 @@ https://docs.google.com/spreadsheets/d/1dkGOT3XaPuHa8Kpj_UpD_sKkSGCs_1P5HyL_Z2II
     if (!cell || cell.v === null || cell.v === undefined) return "";
     const str = String(cell.v).trim();
     return str;
+  }
+
+  // Igual que cellValue, pero SIN recortar espacios. Se usa solo para la
+  // primera columna, porque ahí un espacio en blanco (" ") debe contar
+  // como "tiene un carácter" y no como celda vacía.
+  function cellValueRaw(row, colIndex) {
+    const cell = row.c[colIndex];
+    if (!cell || cell.v === null || cell.v === undefined) return "";
+    return String(cell.v);
   }
 
   function isUrl(value) {
@@ -191,15 +192,24 @@ https://docs.google.com/spreadsheets/d/1dkGOT3XaPuHa8Kpj_UpD_sKkSGCs_1P5HyL_Z2II
       // poder contarlos antes de convertirlos en HTML.
       const recordFields = rows
         .map(r => {
-          // Arma la lista de campos {header, value} de esta fila, en orden,
-          // descartando las celdas vacías.
-          const fields = headers
-            .map((header, i) => ({ header, value: cellValue(r, i) }))
+          // La primera columna decide si el registro existe: si no tiene
+          // NINGÚN carácter se descarta. Si tiene al menos un carácter
+          // (aunque sea un espacio en blanco " "), el registro se toma y
+          // se muestra igual que cualquier otro (por eso acá NO se usa
+          // cellValue, que recorta espacios, sino cellValueRaw).
+          const firstColRaw = cellValueRaw(r, 0);
+          if (firstColRaw.length === 0) return null;
+
+          // El resto de las columnas sigue funcionando como antes:
+          // se descartan las que no tengan dato.
+          const restFields = headers
+            .slice(1)
+            .map((header, i) => ({ header, value: cellValue(r, i + 1) }))
             .filter(f => f.value !== "");
 
-          return fields;
+          return [{ header: headers[0], value: firstColRaw }, ...restFields];
         })
-        .filter(fields => fields.length > 0); // descarta filas totalmente vacías
+        .filter(fields => fields !== null); // descarta solo las filas sin primera columna
 
       countEl.textContent = `Actualizados: ${recordFields.length} Registros`;
 
