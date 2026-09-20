@@ -351,7 +351,7 @@ https://docs.google.com/spreadsheets/d/
   // CORS "Access-Control-Allow-Origin" — por eso siempre caía en
   // el mensaje de error genérico.
   // ------------------------------------------------------------
-  const SHEETS_API_KEY = "32a597d1d8312f727a988911c0e3f20ae7e2cb2f"; // reemplazar por tu key
+  const SHEETS_API_KEY = "TU_API_KEY_DE_GOOGLE_CLOUD_AQUI"; // reemplazar por tu key
   const SHEETS_METADATA_URL =
     `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}` +
     `?key=${SHEETS_API_KEY}&fields=sheets.properties.title`;
@@ -442,8 +442,19 @@ https://docs.google.com/spreadsheets/d/
     try {
       const res = await fetch(SHEETS_METADATA_URL);
       if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        throw new Error(`HTTP ${res.status}: ${body}`);
+        // Se intenta leer el cuerpo JSON de error que devuelve Google
+        // (suele traer error.message con el motivo exacto: key
+        // inválida, referer no permitido, API no habilitada, etc.)
+        let detail = `HTTP ${res.status}`;
+        try {
+          const errJson = await res.json();
+          if (errJson && errJson.error && errJson.error.message) {
+            detail = errJson.error.message;
+          }
+        } catch (parseErr) {
+          // el cuerpo no era JSON; nos quedamos con el código HTTP
+        }
+        throw new Error(detail);
       }
       const json = await res.json();
       const sheetsMeta = json.sheets || [];
@@ -468,8 +479,9 @@ https://docs.google.com/spreadsheets/d/
         .join("");
       tablrStatusEl.textContent = "";
     } catch (err) {
-      tablrStatusEl.textContent =
-        'No se pudo obtener el listado de hojas "tabLR". Verificá la API key y que la planilla sea pública.';
+      // Se muestra el motivo real del error (antes solo iba a la
+      // consola con un mensaje genérico en pantalla).
+      tablrStatusEl.textContent = `No se pudo obtener el listado de hojas "tabLR": ${err.message}`;
       console.error(err);
     }
   }
@@ -558,5 +570,7 @@ https://docs.google.com/spreadsheets/d/
 })();
 </script>
 
+</body>
+</html>
 </body>
 </html>
