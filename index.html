@@ -110,6 +110,28 @@ https://docs.google.com/spreadsheets/d/
   }
   #sheet-sync-list .record .extra-field a:hover { text-decoration: underline; }
 
+  /* ===== Enlaces generados a partir de las hojas "tabLR" ===== */
+  #tablr-links {
+    margin-bottom: 12px;
+  }
+  #tablr-links:empty { margin-bottom: 0; }
+  #tablr-links .tablr-link {
+    display: block;
+    font-size: 14px;
+    color: #1a73e8;
+    text-decoration: none;
+    padding: 6px 0;
+    border-bottom: 1px dashed #e2e2e2;
+  }
+  #tablr-links .tablr-link:last-child { border-bottom: none; }
+  #tablr-links .tablr-link:hover { text-decoration: underline; }
+  #tablr-status {
+    font-size: 12px;
+    color: #999;
+    margin-bottom: 8px;
+    min-height: 14px;
+  }
+
   /* ===== Barra de control de zoom (NUNCA se escala) ===== */
   #zoom-toolbar {
     position: fixed;
@@ -172,18 +194,6 @@ https://docs.google.com/spreadsheets/d/
   <button id="zoom-in" title="Acercar">+</button>
 </div>
 
-
-  
-<br><br><br>
-
-<a href="https://luchorcompartidos.github.io/lrfuturatabla2link2" target="_blank" rel="noopener">lrfuturatabla2link2</a>
-
-
-
-<br><br><br>
-
-
-  
 <div id="zoom-content">
   <div id="sheet-sync-container">
     <h1>LR WEB CATALOG Genérico</h1>
@@ -193,6 +203,8 @@ https://docs.google.com/spreadsheets/d/
     </div>
     <div id="sheet-sync-count"></div>
     <div id="sheet-sync-status"></div>
+    <div id="tablr-status"></div>
+    <div id="tablr-links"></div>
     <div id="sheet-sync-list"></div>
   </div>
 </div>
@@ -298,10 +310,22 @@ https://docs.google.com/spreadsheets/d/
   // el primer registro de datos.
   const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&gid=${GID}&headers=1`;
 
+  // ------------------------------------------------------------
+  // Listado de hojas ("Sheets") cuyo nombre contiene "tabLR".
+  // Usa el feed público de hojas de cálculo (API v3, sigue vigente
+  // para planillas compartidas como "cualquiera con el enlace"),
+  // que devuelve el título de cada pestaña sin necesitar API key.
+  // ------------------------------------------------------------
+  const WORKSHEETS_FEED_URL = `https://spreadsheets.google.com/feeds/worksheets/${SHEET_ID}/public/basic?alt=json`;
+  const TABLR_KEYWORD = "tabLR";
+  const TABLR_BASE_URL = "https://luchorcompartidos.github.io/";
+
   const statusEl = document.getElementById("sheet-sync-status");
   const timeEl = document.getElementById("sheet-sync-time");
   const listEl = document.getElementById("sheet-sync-list");
   const countEl = document.getElementById("sheet-sync-count");
+  const tablrStatusEl = document.getElementById("tablr-status");
+  const tablrLinksEl = document.getElementById("tablr-links");
 
   function escapeHtml(str) {
     return String(str)
@@ -351,6 +375,44 @@ https://docs.google.com/spreadsheets/d/
       return `<a href="${safeUrl}" target="_blank" rel="noopener">${label}</a>`;
     }
     return escapeHtml(value);
+  }
+
+  // Recorre TODAS las hojas ("Sheets") del archivo de Google Drive
+  // referenciado (no solo la hoja activa por GID) y, para cada una
+  // cuyo nombre contenga "tabLR", arma y lista un hipervínculo con
+  // la estructura: https://luchorcompartidos.github.io/<nombre de la hoja>
+  async function syncTabLRLinks() {
+    tablrStatusEl.textContent = "Buscando hojas \"tabLR\"...";
+    try {
+      const res = await fetch(WORKSHEETS_FEED_URL);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const entries = (json.feed && json.feed.entry) || [];
+
+      // El feed devuelve el título de cada pestaña en entry.title.$t
+      const sheetNames = entries
+        .map(entry => (entry.title && entry.title.$t) ? entry.title.$t.trim() : "")
+        .filter(name => name.length > 0 && name.includes(TABLR_KEYWORD));
+
+      if (sheetNames.length === 0) {
+        tablrLinksEl.innerHTML = "";
+        tablrStatusEl.textContent = "";
+        return;
+      }
+
+      tablrLinksEl.innerHTML = sheetNames
+        .map(name => {
+          const href = escapeHtml(TABLR_BASE_URL + name);
+          return `<a class="tablr-link" href="${href}" target="_blank" rel="noopener">${escapeHtml(name)}</a>`;
+        })
+        .join("");
+
+      tablrStatusEl.textContent = "";
+    } catch (err) {
+      tablrLinksEl.innerHTML = "";
+      tablrStatusEl.textContent = "No se pudo obtener el listado de hojas \"tabLR\".";
+      console.error(err);
+    }
   }
 
   async function syncSheet() {
@@ -426,9 +488,14 @@ https://docs.google.com/spreadsheets/d/
     }
   }
 
-  document.getElementById("sheet-sync-refresh").addEventListener("click", syncSheet);
-  syncSheet();
-  setInterval(syncSheet, REFRESH_MS);
+  function refreshAll() {
+    syncTabLRLinks();
+    syncSheet();
+  }
+
+  document.getElementById("sheet-sync-refresh").addEventListener("click", refreshAll);
+  refreshAll();
+  setInterval(refreshAll, REFRESH_MS);
 })();
 </script>
 
