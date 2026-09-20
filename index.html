@@ -110,27 +110,45 @@ https://docs.google.com/spreadsheets/d/
   }
   #sheet-sync-list .record .extra-field a:hover { text-decoration: underline; }
 
-  /* ===== Enlaces generados a partir de las hojas "tabLR" ===== */
-  #tablr-links {
-    margin-bottom: 12px;
+  /* ===== Sección independiente de enlaces "tabLR" (fuera del catálogo) ===== */
+  #tablr-section {
+    max-width: 700px;
+    margin: 0 auto 20px auto;
+    display: none; /* se muestra por JS solo si hay contenido que mostrar */
   }
-  #tablr-links:empty { margin-bottom: 0; }
+  #tablr-section.tablr-visible {
+    display: block;
+  }
+  #tablr-heading {
+    font-size: 15px;
+    font-weight: 700;
+    color: #1a2b1a;
+    margin: 0 0 8px 0;
+    display: none; /* se muestra por JS solo si hay al menos un enlace */
+  }
+  #tablr-heading.tablr-visible {
+    display: block;
+  }
   #tablr-links .tablr-link {
     display: block;
     font-size: 14px;
     color: #1a73e8;
     text-decoration: none;
-    padding: 6px 0;
-    border-bottom: 1px dashed #e2e2e2;
+    background: #fff;
+    border: 1px solid #e5e5e5;
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin-bottom: 6px;
   }
-  #tablr-links .tablr-link:last-child { border-bottom: none; }
-  #tablr-links .tablr-link:hover { text-decoration: underline; }
+  #tablr-links .tablr-link:last-child { margin-bottom: 0; }
+  #tablr-links .tablr-link:hover { text-decoration: underline; background: #f7faff; }
   #tablr-status {
     font-size: 12px;
     color: #999;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     min-height: 14px;
   }
+  #tablr-status:empty { margin-bottom: 0; }
 
   /* ===== Barra de control de zoom (NUNCA se escala) ===== */
   #zoom-toolbar {
@@ -195,6 +213,12 @@ https://docs.google.com/spreadsheets/d/
 </div>
 
 <div id="zoom-content">
+  <div id="tablr-section">
+    <h2 id="tablr-heading">Tablas LR</h2>
+    <div id="tablr-status"></div>
+    <div id="tablr-links"></div>
+  </div>
+
   <div id="sheet-sync-container">
     <h1>LR WEB CATALOG Genérico</h1>
     <div class="sheet-sync-header">
@@ -203,8 +227,6 @@ https://docs.google.com/spreadsheets/d/
     </div>
     <div id="sheet-sync-count"></div>
     <div id="sheet-sync-status"></div>
-    <div id="tablr-status"></div>
-    <div id="tablr-links"></div>
     <div id="sheet-sync-list"></div>
   </div>
 </div>
@@ -312,11 +334,27 @@ https://docs.google.com/spreadsheets/d/
 
   // ------------------------------------------------------------
   // Listado de hojas ("Sheets") cuyo nombre contiene "tabLR".
-  // Usa el feed público de hojas de cálculo (API v3, sigue vigente
-  // para planillas compartidas como "cualquiera con el enlace"),
-  // que devuelve el título de cada pestaña sin necesitar API key.
+  //
+  // Se usa la Google Sheets API v4 (sheets.googleapis.com), que sí
+  // soporta CORS para lectura pública y es el método vigente para
+  // leer metadatos (como el título de cada pestaña) sin backend
+  // propio. Requiere una API key de Google Cloud con la "Google
+  // Sheets API" habilitada (no requiere OAuth para leer un archivo
+  // público; alcanza con restringir la key por dominio/referer).
+  //
+  // Por qué NO se usa el viejo feed "spreadsheets.google.com/feeds/
+  // worksheets/.../public/basic": esa API (v3, GData) está
+  // descontinuada, solo expone datos si el archivo fue
+  // explícitamente "Publicado en la web" (distinto de "Cualquiera
+  // con el enlace puede ver") y, aun así, en la mayoría de los
+  // casos el navegador bloquea la respuesta por falta del header
+  // CORS "Access-Control-Allow-Origin" — por eso siempre caía en
+  // el mensaje de error genérico.
   // ------------------------------------------------------------
-  const WORKSHEETS_FEED_URL = `https://spreadsheets.google.com/feeds/worksheets/${SHEET_ID}/public/basic?alt=json`;
+  const SHEETS_API_KEY = "TU_API_KEY_DE_GOOGLE_CLOUD_AQUI"; // reemplazar por tu key
+  const SHEETS_METADATA_URL =
+    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}` +
+    `?key=${SHEETS_API_KEY}&fields=sheets.properties.title`;
   const TABLR_KEYWORD = "tabLR";
   const TABLR_BASE_URL = "https://luchorcompartidos.github.io/";
 
@@ -324,6 +362,8 @@ https://docs.google.com/spreadsheets/d/
   const timeEl = document.getElementById("sheet-sync-time");
   const listEl = document.getElementById("sheet-sync-list");
   const countEl = document.getElementById("sheet-sync-count");
+  const tablrSectionEl = document.getElementById("tablr-section");
+  const tablrHeadingEl = document.getElementById("tablr-heading");
   const tablrStatusEl = document.getElementById("tablr-status");
   const tablrLinksEl = document.getElementById("tablr-links");
 
@@ -381,36 +421,55 @@ https://docs.google.com/spreadsheets/d/
   // referenciado (no solo la hoja activa por GID) y, para cada una
   // cuyo nombre contenga "tabLR", arma y lista un hipervínculo con
   // la estructura: https://luchorcompartidos.github.io/<nombre de la hoja>
+  //
+  // Esta sección se muestra fuera y arriba del catálogo "LR WEB
+  // CATALOG Genérico". El contenedor completo (#tablr-section)
+  // solo se hace visible si hay algo que mostrar (enlaces o un
+  // mensaje de error/estado); el título "Tablas LR" solo se
+  // muestra si se encontró al menos un enlace.
   async function syncTabLRLinks() {
-    tablrStatusEl.textContent = "Buscando hojas \"tabLR\"...";
-    try {
-      const res = await fetch(WORKSHEETS_FEED_URL);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      const entries = (json.feed && json.feed.entry) || [];
+    tablrSectionEl.classList.add("tablr-visible");
+    tablrHeadingEl.classList.remove("tablr-visible");
+    tablrLinksEl.innerHTML = "";
+    tablrStatusEl.textContent = 'Buscando hojas "tabLR"...';
 
-      // El feed devuelve el título de cada pestaña en entry.title.$t
-      const sheetNames = entries
-        .map(entry => (entry.title && entry.title.$t) ? entry.title.$t.trim() : "")
+    if (!SHEETS_API_KEY || SHEETS_API_KEY === "TU_API_KEY_DE_GOOGLE_CLOUD_AQUI") {
+      tablrStatusEl.textContent =
+        'Falta configurar SHEETS_API_KEY (ver comentario en el código) para poder listar las hojas "tabLR".';
+      return;
+    }
+
+    try {
+      const res = await fetch(SHEETS_METADATA_URL);
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status}: ${body}`);
+      }
+      const json = await res.json();
+      const sheetsMeta = json.sheets || [];
+
+      // El título de cada pestaña viene en sheet.properties.title
+      const sheetNames = sheetsMeta
+        .map(sheet => (sheet.properties && sheet.properties.title) ? sheet.properties.title.trim() : "")
         .filter(name => name.length > 0 && name.includes(TABLR_KEYWORD));
 
       if (sheetNames.length === 0) {
-        tablrLinksEl.innerHTML = "";
         tablrStatusEl.textContent = "";
+        tablrSectionEl.classList.remove("tablr-visible");
         return;
       }
 
+      tablrHeadingEl.classList.add("tablr-visible");
       tablrLinksEl.innerHTML = sheetNames
         .map(name => {
           const href = escapeHtml(TABLR_BASE_URL + name);
           return `<a class="tablr-link" href="${href}" target="_blank" rel="noopener">${escapeHtml(name)}</a>`;
         })
         .join("");
-
       tablrStatusEl.textContent = "";
     } catch (err) {
-      tablrLinksEl.innerHTML = "";
-      tablrStatusEl.textContent = "No se pudo obtener el listado de hojas \"tabLR\".";
+      tablrStatusEl.textContent =
+        'No se pudo obtener el listado de hojas "tabLR". Verificá la API key y que la planilla sea pública.';
       console.error(err);
     }
   }
