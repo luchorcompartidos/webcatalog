@@ -1,8 +1,15 @@
-https://docs.google.com/spreadsheets/d/1dkGOT3XaPuHa8Kpj_UpD_sKkSGCs_1P5HyL_Z2IIcmQ/edit?gid=0#gid=0
+https://docs.google.com/spreadsheets/d/
+/1dkGOT3XaPuHa8Kpj_UpD_sKkSGCs_1P5HyL_Z2IIcmQ/edit?gid=0#gid=0
+<br><br><br>
+
+<a href="https://docs.google.com/spreadsheets/d/1dkGOT3XaPuHa8Kpj_UpD_sKkSGCs_1P5HyL_Z2IIcmQ" target="_blank" rel="noopener">Planilla fuente en Google Drive</a>
+<br><br><br>
+
+<a href="https://luchorcompartidos.github.io/lrfuturatablalink" target="_blank" rel="noopener">lrfuturatablalink</a>
 
 
 
-
+<br><br><br>
 
 
 
@@ -13,12 +20,21 @@ https://docs.google.com/spreadsheets/d/1dkGOT3XaPuHa8Kpj_UpD_sKkSGCs_1P5HyL_Z2II
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LRWebCatalog Dinámico</title>
 <style>
+  html, body {
+    margin: 0;
+    padding: 0;
+  }
   body {
     font-family: -apple-system, Segoe UI, Roboto, sans-serif;
     background: #fafafa;
-    margin: 0;
-    padding: 30px 16px;
   }
+
+  /* ===== Contenido escalable ===== */
+  #zoom-content {
+    padding: 30px 16px 60px 16px;
+    /* transform-origin se fija por JS según el navegador use zoom o transform */
+  }
+
   #sheet-sync-container {
     max-width: 700px;
     margin: 0 auto;
@@ -93,24 +109,168 @@ https://docs.google.com/spreadsheets/d/1dkGOT3XaPuHa8Kpj_UpD_sKkSGCs_1P5HyL_Z2II
     text-decoration: none;
   }
   #sheet-sync-list .record .extra-field a:hover { text-decoration: underline; }
+
+  /* ===== Barra de control de zoom (NUNCA se escala) ===== */
+  #zoom-toolbar {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 999999;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: #fff;
+    border: 1px solid #d0d0d0;
+    border-radius: 8px;
+    padding: 4px 6px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    /* aislado de cualquier zoom/transform del contenido */
+    zoom: 1 !important;
+    transform: none !important;
+  }
+  #zoom-toolbar button {
+    border: 1px solid #ccc;
+    background: #f7f7f7;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 6px 9px;
+    color: #333;
+    min-width: 28px;
+  }
+  #zoom-toolbar button:hover { background: #eee; }
+  #zoom-toolbar button:active { background: #e2e2e2; }
+  #zoom-reset {
+    font-size: 15px;
+    padding: 6px 8px;
+  }
+  #zoom-level {
+    font-size: 12px;
+    font-weight: 600;
+    color: #333;
+    min-width: 42px;
+    text-align: center;
+    padding: 6px 4px;
+    border-radius: 6px;
+    background: #f0f0f0;
+    border: 1px solid #ddd;
+    cursor: pointer;
+  }
+  #zoom-level:hover { background: #e6e6e6; }
+  #zoom-level:active { background: #dcdcdc; }
 </style>
 </head>
 <body>
 
-<div id="sheet-sync-container">
-  <h1>LR WEB CATALOG Genérico</h1>
-  <div class="sheet-sync-header">
-    <span>Última sincronización: <span id="sheet-sync-time">—</span></span>
-    <button id="sheet-sync-refresh">Actualizar ahora</button>
+<!-- Barra fija de zoom: Reset | − | 100% | + -->
+<div id="zoom-toolbar">
+  <button id="zoom-reset" title="Restablecer zoom a 100%">⟲</button>
+  <button id="zoom-out" title="Alejar">−</button>
+  <button id="zoom-level" title="Recargar sin caché (equivalente a Ctrl+F5)">100%</button>
+  <button id="zoom-in" title="Acercar">+</button>
+</div>
+
+<div id="zoom-content">
+  <div id="sheet-sync-container">
+    <h1>LR WEB CATALOG Genérico</h1>
+    <div class="sheet-sync-header">
+      <span>Última sincronización: <span id="sheet-sync-time">—</span></span>
+      <button id="sheet-sync-refresh">Actualizar ahora</button>
+    </div>
+    <div id="sheet-sync-count"></div>
+    <div id="sheet-sync-status"></div>
+    <div id="sheet-sync-list"></div>
   </div>
-  <div id="sheet-sync-count"></div>
-  <div id="sheet-sync-status"></div>
-  <div id="sheet-sync-list"></div>
 </div>
 
 <script>
 (function () {
-  // --- Configuración ---
+  // ============================================================
+  //  CONTROL DE ZOOM RESPONSIVE
+  // ============================================================
+  // Usa la propiedad CSS "zoom" (nativa, reacomoda el layout real,
+  // igual que Ctrl + "+"/"-" del navegador). Nunca genera scroll
+  // horizontal: el contenido solo crece hacia abajo.
+  // Si el navegador no soporta "zoom" (Firefox viejo, etc.), se
+  // usa un fallback con transform: scale() ajustando el ancho
+  // para evitar el scroll horizontal.
+  const ZOOM_MIN = 70;
+  const ZOOM_MAX = 160;
+  const ZOOM_STEP = 10;
+  const ZOOM_DEFAULT = 100;
+  const STORAGE_KEY = "lrwebcatalog_zoom_level";
+
+  const zoomContent = document.getElementById("zoom-content");
+  const zoomLevelBtn = document.getElementById("zoom-level");
+  const zoomInBtn = document.getElementById("zoom-in");
+  const zoomOutBtn = document.getElementById("zoom-out");
+  const zoomResetBtn = document.getElementById("zoom-reset");
+
+  // Detección de soporte nativo de "zoom" (Chrome, Edge, Safari lo
+  // soportan; Firefox históricamente no).
+  const supportsNativeZoom = CSS.supports("zoom: 1.5");
+
+  function clamp(value) {
+    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value));
+  }
+
+  function loadZoom() {
+    const stored = parseInt(localStorage.getItem(STORAGE_KEY), 10);
+    if (!isNaN(stored) && stored >= ZOOM_MIN && stored <= ZOOM_MAX) {
+      return stored;
+    }
+    return ZOOM_DEFAULT;
+  }
+
+  function applyZoom(level) {
+    const factor = level / 100;
+    if (supportsNativeZoom) {
+      zoomContent.style.zoom = String(factor);
+      zoomContent.style.transform = "";
+      zoomContent.style.width = "";
+    } else {
+      // Fallback con transform: scale(). Para que no aparezca scroll
+      // horizontal, compensamos el ancho en proporción inversa al
+      // factor de escala, ya que transform no reacomoda el layout.
+      zoomContent.style.transformOrigin = "top left";
+      zoomContent.style.transform = `scale(${factor})`;
+      zoomContent.style.width = `${100 / factor}%`;
+    }
+    zoomLevelBtn.textContent = `${level}%`;
+    zoomLevelBtn.dataset.level = String(level);
+    localStorage.setItem(STORAGE_KEY, String(level));
+  }
+
+  function changeZoom(delta) {
+    const current = parseInt(zoomLevelBtn.dataset.level, 10) || ZOOM_DEFAULT;
+    applyZoom(clamp(current + delta));
+  }
+
+  // El botón de porcentaje ("100%") NO solo resetea: fuerza una
+  // recarga sin caché, simulando Ctrl+F5. Se agrega un parámetro
+  // de timestamp para invalidar la caché y se usa location.replace
+  // para no dejar entrada extra en el historial.
+  function hardReload() {
+    const base = window.location.href.split("?")[0].split("#")[0];
+    window.location.replace(`${base}?_=${Date.now()}`);
+  }
+
+  zoomInBtn.addEventListener("click", () => changeZoom(ZOOM_STEP));
+  zoomOutBtn.addEventListener("click", () => changeZoom(-ZOOM_STEP));
+  zoomResetBtn.addEventListener("click", () => applyZoom(ZOOM_DEFAULT));
+  zoomLevelBtn.addEventListener("click", hardReload);
+
+  applyZoom(loadZoom());
+})();
+</script>
+
+<script>
+(function () {
+  // ============================================================
+  //  SINCRONIZACIÓN CON GOOGLE SHEETS (sin cambios de lógica)
+  // ============================================================
   // A diferencia de la versión anterior, esta app NO busca columnas por nombre.
   // Toma todas las columnas que existan en la planilla, en el orden en que
   // aparezcan, y decide cómo mostrar cada valor según su propio contenido
