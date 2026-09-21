@@ -215,9 +215,6 @@ https://docs.google.com/spreadsheets/d/
 <div id="zoom-content">
   <div id="tablr-section">
     <h2 id="tablr-heading">Tablas LR</h2>
-
-    <h4 id="tablr-headingH4">Hojas/Sheets cuyo nombre contiene el string "tabLR"</h4>
-    
     <div id="tablr-status"></div>
     <div id="tablr-links"></div>
   </div>
@@ -357,8 +354,10 @@ https://docs.google.com/spreadsheets/d/
   const SHEETS_API_KEY = "AIzaSyA2Zs9dcx7mUf5kdHeziIneA2c_7BqJlKY"; // reemplazar por tu key
   const SHEETS_METADATA_URL =
     `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}` +
-    `?key=${SHEETS_API_KEY}&fields=sheets.properties.title`;
+    `?key=${SHEETS_API_KEY}&fields=sheets.properties.title,sheets.properties.sheetId`;
   const TABLR_KEYWORD = "tabLR";
+  // Estructura final del enlace generado para cada hoja "tabLR":
+  // https://luchorcompartidos.github.io/tablaN/index.html?sheetId=<SHEET_ID>&gid=<GID_de_la_hoja>
   const TABLR_BASE_URL = "https://luchorcompartidos.github.io/tabla"; // + número secuencial (1, 2, 3...)
 
   const statusEl = document.getElementById("sheet-sync-status");
@@ -462,29 +461,41 @@ https://docs.google.com/spreadsheets/d/
       const json = await res.json();
       const sheetsMeta = json.sheets || [];
 
-      // El título de cada pestaña viene en sheet.properties.title
+      // El título de cada pestaña viene en sheet.properties.title, y su
+      // GID real dentro del archivo (el mismo que usa la URL nativa de
+      // Google Sheets como "#gid=...") viene en sheet.properties.sheetId.
       // El orden de "sheetsMeta" respeta el orden real de las pestañas
       // en el archivo de Drive (así lo devuelve la Sheets API v4), y
-      // "sheetNames" conserva ese mismo orden al filtrar solo las que
+      // "sheetEntries" conserva ese mismo orden al filtrar solo las que
       // contienen "tabLR". Por eso el número secuencial de la URL
       // (tabla1, tabla2, tabla3...) se asigna según la posición dentro
       // de este arreglo ya filtrado, no según el nombre de la hoja.
-      const sheetNames = sheetsMeta
-        .map(sheet => (sheet.properties && sheet.properties.title) ? sheet.properties.title.trim() : "")
-        .filter(name => name.length > 0 && name.includes(TABLR_KEYWORD));
+      const sheetEntries = sheetsMeta
+        .map(sheet => ({
+          name: (sheet.properties && sheet.properties.title) ? sheet.properties.title.trim() : "",
+          gid: (sheet.properties && sheet.properties.sheetId !== undefined && sheet.properties.sheetId !== null)
+            ? String(sheet.properties.sheetId)
+            : ""
+        }))
+        .filter(entry => entry.name.length > 0 && entry.name.includes(TABLR_KEYWORD));
 
-      if (sheetNames.length === 0) {
+      if (sheetEntries.length === 0) {
         tablrStatusEl.textContent = "";
         tablrSectionEl.classList.remove("tablr-visible");
         return;
       }
 
       tablrHeadingEl.classList.add("tablr-visible");
-      tablrLinksEl.innerHTML = sheetNames
-        .map((name, index) => {
+      tablrLinksEl.innerHTML = sheetEntries
+        .map((entry, index) => {
           const sequentialNumber = index + 1; // tabla1, tabla2, tabla3...
-          const href = escapeHtml(`${TABLR_BASE_URL}${sequentialNumber}`);
-          return `<a class="tablr-link" href="${href}" target="_blank" rel="noopener">${escapeHtml(name)}</a>`;
+          // SHEET_ID identifica el archivo completo; gid identifica la
+          // hoja/pestaña puntual dentro de ese archivo. Ambos se pasan
+          // como parámetros de consulta en la URL final.
+          const href = escapeHtml(
+            `${TABLR_BASE_URL}${sequentialNumber}/index.html?sheetId=${SHEET_ID}&gid=${entry.gid}`
+          );
+          return `<a class="tablr-link" href="${href}" target="_blank" rel="noopener">${escapeHtml(entry.name)}</a>`;
         })
         .join("");
       tablrStatusEl.textContent = "";
