@@ -315,13 +315,14 @@ https://docs.google.com/spreadsheets/d/
 <script>
 (function () {
   // ============================================================
-  //  SINCRONIZACIÓN CON GOOGLE SHEETS (sin cambios de lógica)
+  //  SINCRONIZACIÓN CON GOOGLE SHEETS
   // ============================================================
-  // A diferencia de la versión anterior, esta app NO busca columnas por nombre.
-  // Toma todas las columnas que existan en la planilla, en el orden en que
-  // aparezcan, y decide cómo mostrar cada valor según su propio contenido
-  // (por ejemplo, si "parece" una URL o no). Si agregás, quitás o reordenás
-  // columnas en la planilla, la página se adapta sola sin tocar el código.
+  // Esta app NO busca columnas por nombre. Toma las columnas que
+  // existan en la planilla, en el orden en que aparezcan, y decide
+  // cómo mostrar cada valor según su propio contenido (por ejemplo,
+  // si "parece" una URL o no). Si agregás, quitás o reordenás
+  // columnas en la planilla, la página se adapta sola sin tocar el
+  // código.
   const SHEET_ID = "1dkGOT3XaPuHa8Kpj_UpD_sKkSGCs_1P5HyL_Z2IIcmQ";  const GID = "0";
   const REFRESH_MS = 86400000; // vuelve a sincronizar cada 24 horas
   const URL_REGEX = /^https?:\/\//i;
@@ -517,30 +518,46 @@ https://docs.google.com/spreadsheets/d/
       const rows = json.table.rows;
       const cols = json.table.cols;
 
-      // Encabezados dinámicos, en el orden en que figuran en la planilla.
-      // Si una columna no tiene encabezado, se le pone un nombre genérico.
-      const headers = cols.map((c, i) => (c.label && c.label.trim()) || `Columna ${i + 1}`);
+      // Columnas a considerar, en el orden de la planilla:
+      // - Si el encabezado de la columna (Fila 1) NO tiene ningún carácter,
+      //   la columna entera se descarta (no se procesa en ninguna fila).
+      // - Si el encabezado tiene al menos 1 carácter, aunque sea un espacio
+      //   en blanco, la columna SÍ se considera. En ese caso, si el
+      //   encabezado queda vacío al recortar espacios, se usa "ColumnaX"
+      //   como nombre, donde X es el número de columna en la planilla
+      //   origen (1 = primera columna de la hoja, 2 = segunda, etc).
+      const activeColumns = cols
+        .map((c, i) => ({ sheetIndex: i, rawLabel: c.label || "" }))
+        .filter(c => c.rawLabel.length > 0)
+        .map(c => {
+          const trimmed = c.rawLabel.trim();
+          return {
+            sheetIndex: c.sheetIndex,
+            header: trimmed !== "" ? trimmed : `Columna${c.sheetIndex + 1}`
+          };
+        });
 
       // Arma primero la lista de registros (filas con al menos un dato) para
       // poder contarlos antes de convertirlos en HTML.
-      const recordFields = rows
+      const recordFields = activeColumns.length === 0 ? [] : rows
         .map(r => {
-          // La primera columna decide si el registro existe: si no tiene
-          // NINGÚN carácter se descarta. Si tiene al menos un carácter
-          // (aunque sea un espacio en blanco " "), el registro se toma y
-          // se muestra igual que cualquier otro (por eso acá NO se usa
-          // cellValue, que recorta espacios, sino cellValueRaw).
-          const firstColRaw = cellValueRaw(r, 0);
+          // La primera columna ACTIVA decide si el registro existe: si no
+          // tiene NINGÚN carácter se descarta. Si tiene al menos un
+          // carácter (aunque sea un espacio en blanco " "), el registro se
+          // toma y se muestra igual que cualquier otro (por eso acá NO se
+          // usa cellValue, que recorta espacios, sino cellValueRaw).
+          const firstColumn = activeColumns[0];
+          const firstColRaw = cellValueRaw(r, firstColumn.sheetIndex);
           if (firstColRaw.length === 0) return null;
 
-          // El resto de las columnas sigue funcionando como antes:
+          // El resto de las columnas activas sigue funcionando como antes:
           // se descartan las que no tengan dato.
-          const restFields = headers
+          const restFields = activeColumns
             .slice(1)
-            .map((header, i) => ({ header, value: cellValue(r, i + 1) }))
+            .map(col => ({ header: col.header, value: cellValue(r, col.sheetIndex) }))
             .filter(f => f.value !== "");
 
-          return [{ header: headers[0], value: firstColRaw }, ...restFields];
+          return [{ header: firstColumn.header, value: firstColRaw }, ...restFields];
         })
         .filter(fields => fields !== null); // descarta solo las filas sin primera columna
 
