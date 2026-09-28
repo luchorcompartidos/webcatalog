@@ -378,21 +378,68 @@ https://docs.google.com/spreadsheets/d/
       .replace(/"/g, "&quot;");
   }
 
-  // Devuelve el valor de una celda como texto, o "" si está vacía / no existe
-  function cellValue(row, colIndex) {
-    const cell = row.c[colIndex];
+  // ------------------------------------------------------------
+  // FORMATO DE FECHAS (DD/MM/AAAA)
+  //
+  // Cuando una columna de la planilla es de tipo Fecha, Google
+  // devuelve el valor como texto "Date(año,mes,día)" donde el mes
+  // va de 0 a 11 (enero = 0). Para columnas Fecha y hora agrega
+  // ",hora,minuto,segundo". Esta función lo convierte a DD/MM/AAAA.
+  // También reconoce fechas escritas como texto en formato ISO
+  // (AAAA-MM-DD) y las convierte igual.
+  // Devuelve null si el valor NO es una fecha (así el resto de los
+  // valores se muestra exactamente como antes).
+  //
+  // Si querés mostrar también la hora en las columnas Fecha y hora,
+  // cambiá DATE_SHOW_TIME a true (resultado: DD/MM/AAAA HH:MM).
+  // ------------------------------------------------------------
+  const DATE_SHOW_TIME = false;
+  const GVIZ_DATE_REGEX = /^Date\((\d+),\s*(\d+),\s*(\d+)(?:,\s*(\d+),\s*(\d+)(?:,\s*(\d+))?)?\)$/;
+  const ISO_DATE_REGEX = /^(\d{4})-(\d{2})-(\d{2})(?:[T ]\d{2}:\d{2}.*)?$/;
+
+  function pad2(n) {
+    return String(n).padStart(2, "0");
+  }
+
+  function formatDateValue(v, colType) {
+    if (typeof v !== "string") return null;
+
+    const g = v.match(GVIZ_DATE_REGEX);
+    if (g) {
+      const year = g[1];
+      const month = Number(g[2]) + 1; // Google usa meses 0-11
+      const day = g[3];
+      let out = `${pad2(day)}/${pad2(month)}/${year}`;
+      if (DATE_SHOW_TIME && colType === "datetime" && g[4] !== undefined) {
+        out += ` ${pad2(g[4])}:${pad2(g[5])}`;
+      }
+      return out;
+    }
+
+    const iso = v.match(ISO_DATE_REGEX);
+    if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+
+    return null;
+  }
+
+  // Convierte el valor de una celda en texto, aplicando formato de
+  // fecha cuando corresponde. Devuelve "" si la celda está vacía.
+  function cellText(cell, colType) {
     if (!cell || cell.v === null || cell.v === undefined) return "";
-    const str = String(cell.v).trim();
-    return str;
+    const formattedDate = formatDateValue(cell.v, colType);
+    return formattedDate !== null ? formattedDate : String(cell.v);
+  }
+
+  // Devuelve el valor de una celda como texto, o "" si está vacía / no existe
+  function cellValue(row, colIndex, colType) {
+    return cellText(row.c[colIndex], colType).trim();
   }
 
   // Igual que cellValue, pero SIN recortar espacios. Se usa solo para la
   // primera columna, porque ahí un espacio en blanco (" ") debe contar
   // como "tiene un carácter" y no como celda vacía.
-  function cellValueRaw(row, colIndex) {
-    const cell = row.c[colIndex];
-    if (!cell || cell.v === null || cell.v === undefined) return "";
-    return String(cell.v);
+  function cellValueRaw(row, colIndex, colType) {
+    return cellText(row.c[colIndex], colType);
   }
 
   function isUrl(value) {
@@ -526,13 +573,16 @@ https://docs.google.com/spreadsheets/d/
       //   encabezado queda vacío al recortar espacios, se usa "ColumnaX"
       //   como nombre, donde X es el número de columna en la planilla
       //   origen (1 = primera columna de la hoja, 2 = segunda, etc).
+      // - Se conserva también el tipo de dato de la columna ("date",
+      //   "datetime", "string", etc.) para poder formatear las fechas.
       const activeColumns = cols
-        .map((c, i) => ({ sheetIndex: i, rawLabel: c.label || "" }))
+        .map((c, i) => ({ sheetIndex: i, rawLabel: c.label || "", type: c.type || "string" }))
         .filter(c => c.rawLabel.length > 0)
         .map(c => {
           const trimmed = c.rawLabel.trim();
           return {
             sheetIndex: c.sheetIndex,
+            type: c.type,
             header: trimmed !== "" ? trimmed : `Columna${c.sheetIndex + 1}`
           };
         });
@@ -547,14 +597,14 @@ https://docs.google.com/spreadsheets/d/
           // toma y se muestra igual que cualquier otro (por eso acá NO se
           // usa cellValue, que recorta espacios, sino cellValueRaw).
           const firstColumn = activeColumns[0];
-          const firstColRaw = cellValueRaw(r, firstColumn.sheetIndex);
+          const firstColRaw = cellValueRaw(r, firstColumn.sheetIndex, firstColumn.type);
           if (firstColRaw.length === 0) return null;
 
           // El resto de las columnas activas sigue funcionando como antes:
           // se descartan las que no tengan dato.
           const restFields = activeColumns
             .slice(1)
-            .map(col => ({ header: col.header, value: cellValue(r, col.sheetIndex) }))
+            .map(col => ({ header: col.header, value: cellValue(r, col.sheetIndex, col.type) }))
             .filter(f => f.value !== "");
 
           return [{ header: firstColumn.header, value: firstColRaw }, ...restFields];
